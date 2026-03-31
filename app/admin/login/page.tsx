@@ -11,31 +11,67 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 import Image from "next/image"
-import { Lock, Flame } from "lucide-react"
+import { Lock, Flame, Loader2 } from "lucide-react"
+import { loginSchema } from "@/lib/validations"
+import { checkRateLimit, resetRateLimit } from "@/lib/rate-limit"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({})
   const router = useRouter()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    const supabase = createBrowserClient()
-    setIsLoading(true)
     setError(null)
+    setFieldErrors({})
+
+    // Rate limiting - máximo 5 tentativas por minuto
+    const rateLimitResult = checkRateLimit("login", {
+      maxAttempts: 5,
+      windowMs: 60 * 1000,
+      blockDurationMs: 5 * 60 * 1000,
+    })
+
+    if (!rateLimitResult.allowed) {
+      setError(rateLimitResult.message || "Muitas tentativas. Tente novamente mais tarde.")
+      return
+    }
+
+    // Validação com Zod
+    const validation = loginSchema.safeParse({ email, password })
+    if (!validation.success) {
+      const errors = validation.error.flatten().fieldErrors
+      setFieldErrors({
+        email: errors.email?.[0],
+        password: errors.password?.[0],
+      })
+      return
+    }
+
+    setIsLoading(true)
 
     try {
+      const supabase = createBrowserClient()
       const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+        email: validation.data.email,
+        password: validation.data.password,
       })
-      if (error) throw error
+      
+      if (error) {
+        // Mensagem genérica para não revelar se o email existe
+        throw new Error("Credenciais inválidas")
+      }
+      
+      // Reset rate limit após login bem-sucedido
+      resetRateLimit("login")
       router.push("/admin")
       router.refresh()
     } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "Erro ao fazer login")
+      // Mensagem genérica de erro para segurança
+      setError("Credenciais inválidas. Verifique seu email e senha.")
     } finally {
       setIsLoading(false)
     }
@@ -75,7 +111,13 @@ export default function LoginPage() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    disabled={isLoading}
+                    autoComplete="email"
+                    className={fieldErrors.email ? "border-destructive" : ""}
                   />
+                  {fieldErrors.email && (
+                    <p className="text-sm text-destructive">{fieldErrors.email}</p>
+                  )}
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="password">Senha</Label>
@@ -85,7 +127,13 @@ export default function LoginPage() {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    disabled={isLoading}
+                    autoComplete="current-password"
+                    className={fieldErrors.password ? "border-destructive" : ""}
                   />
+                  {fieldErrors.password && (
+                    <p className="text-sm text-destructive">{fieldErrors.password}</p>
+                  )}
                 </div>
                 {error && (
                   <div className="p-3 rounded-lg bg-destructive/10 border border-destructive">
@@ -93,7 +141,14 @@ export default function LoginPage() {
                   </div>
                 )}
                 <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Entrando..." : "Entrar"}
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Entrando...
+                    </>
+                  ) : (
+                    "Entrar"
+                  )}
                 </Button>
               </div>
               <div className="mt-6 text-center">

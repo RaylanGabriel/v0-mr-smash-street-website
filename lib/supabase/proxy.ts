@@ -41,5 +41,11 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  // Adiciona headers de segurança
+  supabaseResponse.headers.set("X-Content-Type-Options", "nosniff")
+  supabaseResponse.headers.set("X-Frame-Options", "DENY")
+  supabaseResponse.headers.set("X-XSS-Protection", "1; mode=block")
+  supabaseResponse.headers.set("Referrer-Policy", "strict-origin-when-cross-origin")
+
   return supabaseResponse
 }

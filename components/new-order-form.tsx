@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import type { MenuItem, Ingredient } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -10,9 +10,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Minus, ShoppingCart, Trash2 } from "lucide-react"
+import { Plus, Minus, ShoppingCart, Trash2, Loader2 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
+import { checkoutSchema, sanitizeString } from "@/lib/validations"
 
 interface OrderItem {
   menuItem: MenuItem
@@ -32,6 +33,9 @@ export function NewOrderForm({ menuItems, ingredients }: NewOrderFormProps) {
   const [selectedMenuItem, setSelectedMenuItem] = useState<MenuItem | null>(null)
   const [selectedIngredients, setSelectedIngredients] = useState<{ ingredient: Ingredient; quantity: number }[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState<{ customerName?: string; notes?: string }>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const isSubmittingRef = useRef(false)
   const router = useRouter()
 
   const addToCart = () => {
@@ -92,20 +96,44 @@ export function NewOrderForm({ menuItems, ingredients }: NewOrderFormProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (cart.length === 0 || !customerName.trim()) return
+    setFieldErrors({})
+    setSubmitError(null)
+    
+    if (cart.length === 0) {
+      setSubmitError("Adicione pelo menos um item ao carrinho.")
+      return
+    }
 
+    // Previne dupla submissão
+    if (isSubmittingRef.current || isSubmitting) return
+
+    // Validação com Zod
+    const validation = checkoutSchema.safeParse({ customerName, notes })
+    if (!validation.success) {
+      const errors = validation.error.flatten().fieldErrors
+      setFieldErrors({
+        customerName: errors.customerName?.[0],
+        notes: errors.notes?.[0],
+      })
+      return
+    }
+
+    isSubmittingRef.current = true
     setIsSubmitting(true)
     const supabase = createClient()
 
     try {
+      const sanitizedName = sanitizeString(validation.data.customerName)
+      const sanitizedNotes = validation.data.notes ? sanitizeString(validation.data.notes) : null
+
       // Criar pedido
       const { data: order, error: orderError } = await supabase
         .from("orders")
         .insert({
-          customer_name: customerName,
+          customer_name: sanitizedName,
           total_price: calculateTotal(),
           estimated_wait_time: cart.length * 10, // 10 minutos por item
-          notes: notes || null,
+          notes: sanitizedNotes,
           status: "pending",
         })
         .select()
@@ -146,9 +174,10 @@ export function NewOrderForm({ menuItems, ingredients }: NewOrderFormProps) {
       router.push("/admin/pedidos")
     } catch (error) {
       console.error("Erro ao criar pedido:", error)
-      alert("Erro ao criar pedido. Tente novamente.")
+      setSubmitError("Erro ao criar pedido. Tente novamente.")
     } finally {
       setIsSubmitting(false)
+      isSubmittingRef.current = false
     }
   }
 
@@ -357,6 +386,12 @@ export function NewOrderForm({ menuItems, ingredients }: NewOrderFormProps) {
             <CardTitle>Dados do Pedido</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {submitError && (
+              <div className="p-3 rounded-lg bg-destructive/10 border border-destructive">
+                <p className="text-sm text-destructive">{submitError}</p>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="customerName">Nome do Cliente *</Label>
               <Input
@@ -365,7 +400,14 @@ export function NewOrderForm({ menuItems, ingredients }: NewOrderFormProps) {
                 onChange={(e) => setCustomerName(e.target.value)}
                 placeholder="Digite o nome"
                 required
+                disabled={isSubmitting}
+                maxLength={100}
+                autoComplete="name"
+                className={fieldErrors.customerName ? "border-destructive" : ""}
               />
+              {fieldErrors.customerName && (
+                <p className="text-sm text-destructive">{fieldErrors.customerName}</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -376,7 +418,13 @@ export function NewOrderForm({ menuItems, ingredients }: NewOrderFormProps) {
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Observações adicionais..."
                 rows={3}
+                disabled={isSubmitting}
+                maxLength={500}
+                className={fieldErrors.notes ? "border-destructive" : ""}
               />
+              {fieldErrors.notes && (
+                <p className="text-sm text-destructive">{fieldErrors.notes}</p>
+              )}
             </div>
 
             <Button
@@ -385,7 +433,14 @@ export function NewOrderForm({ menuItems, ingredients }: NewOrderFormProps) {
               size="lg"
               disabled={cart.length === 0 || !customerName.trim() || isSubmitting}
             >
-              {isSubmitting ? "Criando Pedido..." : "Finalizar Pedido"}
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Criando Pedido...
+                </>
+              ) : (
+                "Finalizar Pedido"
+              )}
             </Button>
           </CardContent>
         </Card>
