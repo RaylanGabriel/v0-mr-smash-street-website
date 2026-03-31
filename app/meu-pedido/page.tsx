@@ -13,6 +13,8 @@ import { Badge } from "@/components/ui/badge"
 import { ArrowLeft, Search, Clock, CheckCircle2, Loader2, Package } from "lucide-react"
 import { ClientHeader } from "@/components/client-header"
 import { ClientFooter } from "@/components/client-footer"
+import { sanitizeString } from "@/lib/validations"
+import { checkRateLimit } from "@/lib/rate-limit"
 
 export default function MeuPedidoPage() {
   const searchParams = useSearchParams()
@@ -38,9 +40,7 @@ export default function MeuPedidoPage() {
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${order.id}` },
-        async (payload) => {
-          console.log("[v0] Order status updated:", payload)
-
+        async () => {
           // Buscar pedido atualizado com todos os relacionamentos
           const { data: updatedOrder } = await supabase
             .from("orders")
@@ -71,8 +71,28 @@ export default function MeuPedidoPage() {
   }, [order])
 
   const searchOrder = async (numero: string) => {
-    if (!numero.trim()) {
+    const trimmedNumero = numero.trim()
+    
+    if (!trimmedNumero) {
       setError("Digite o número do pedido")
+      return
+    }
+
+    // Validação: apenas números
+    if (!/^\d+$/.test(trimmedNumero)) {
+      setError("Número do pedido inválido. Digite apenas números.")
+      return
+    }
+
+    // Rate limiting - máximo 10 buscas por minuto
+    const rateLimitResult = checkRateLimit("order-search", {
+      maxAttempts: 10,
+      windowMs: 60 * 1000,
+      blockDurationMs: 60 * 1000,
+    })
+
+    if (!rateLimitResult.allowed) {
+      setError(rateLimitResult.message || "Muitas tentativas. Aguarde um momento.")
       return
     }
 
@@ -95,7 +115,7 @@ export default function MeuPedidoPage() {
           )
         `,
         )
-        .eq("order_number", Number.parseInt(numero))
+        .eq("order_number", Number.parseInt(trimmedNumero))
         .single()
 
       if (fetchError) throw fetchError
@@ -205,7 +225,7 @@ export default function MeuPedidoPage() {
                     {order.notes && (
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">Observações</span>
-                        <span>{order.notes}</span>
+                        <span className="max-w-[200px] text-right">{sanitizeString(order.notes)}</span>
                       </div>
                     )}
                   </div>

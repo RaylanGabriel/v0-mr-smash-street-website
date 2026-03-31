@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { createBrowserClient } from "@/lib/supabase/client"
 import type { MenuItem, Ingredient } from "@/lib/types"
 import { useRouter } from "next/navigation"
@@ -15,6 +15,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { ArrowLeft, Loader2 } from "lucide-react"
 import { ClientHeader } from "@/components/client-header"
 import { ClientFooter } from "@/components/client-footer"
+import { checkoutSchema, sanitizeString } from "@/lib/validations"
+import { checkRateLimit } from "@/lib/rate-limit"
 
 interface CartItem {
   menuItem: MenuItem
@@ -27,6 +29,9 @@ export default function FinalizarPedidoPage() {
   const [customerName, setCustomerName] = useState("")
   const [notes, setNotes] = useState("")
   const [loading, setLoading] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState<{ customerName?: string; notes?: string }>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const isSubmitting = useRef(false) // Previne dupla submissão
   const router = useRouter()
   const supabase = createBrowserClient()
 
@@ -53,24 +58,51 @@ export default function FinalizarPedidoPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!customerName.trim()) {
-      alert("Por favor, informe seu nome")
+    setFieldErrors({})
+    setSubmitError(null)
+
+    // Previne dupla submissão
+    if (isSubmitting.current || loading) return
+    
+    // Rate limiting - máximo 3 pedidos por minuto
+    const rateLimitResult = checkRateLimit("checkout", {
+      maxAttempts: 3,
+      windowMs: 60 * 1000,
+      blockDurationMs: 2 * 60 * 1000,
+    })
+
+    if (!rateLimitResult.allowed) {
+      setSubmitError(rateLimitResult.message || "Aguarde antes de fazer outro pedido.")
       return
     }
 
+    // Validação com Zod
+    const validation = checkoutSchema.safeParse({ customerName, notes })
+    if (!validation.success) {
+      const errors = validation.error.flatten().fieldErrors
+      setFieldErrors({
+        customerName: errors.customerName?.[0],
+        notes: errors.notes?.[0],
+      })
+      return
+    }
+
+    isSubmitting.current = true
     setLoading(true)
 
     try {
       const totalPrice = calculateTotal()
+      const sanitizedName = sanitizeString(validation.data.customerName)
+      const sanitizedNotes = validation.data.notes ? sanitizeString(validation.data.notes) : null
 
       const { data: orderData, error: orderError } = await supabase
         .from("orders")
         .insert({
-          customer_name: customerName,
+          customer_name: sanitizedName,
           status: "pendente",
           total_price: totalPrice,
           estimated_wait_time: 20,
-          notes: notes || null,
+          notes: sanitizedNotes,
         })
         .select()
         .single()
@@ -111,9 +143,10 @@ export default function FinalizarPedidoPage() {
       router.push(`/meu-pedido?numero=${orderData.order_number}`)
     } catch (error) {
       console.error("Erro ao criar pedido:", error)
-      alert("Erro ao criar pedido. Tente novamente.")
+      setSubmitError("Erro ao criar pedido. Tente novamente.")
     } finally {
       setLoading(false)
+      isSubmitting.current = false
     }
   }
 
@@ -173,6 +206,12 @@ export default function FinalizarPedidoPage() {
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-4">
+                {submitError && (
+                  <div className="p-3 rounded-lg bg-destructive/10 border border-destructive">
+                    <p className="text-sm text-destructive">{submitError}</p>
+                  </div>
+                )}
+
                 <div>
                   <Label htmlFor="name">Nome *</Label>
                   <Input
@@ -181,7 +220,14 @@ export default function FinalizarPedidoPage() {
                     onChange={(e) => setCustomerName(e.target.value)}
                     placeholder="Digite seu nome"
                     required
+                    disabled={loading}
+                    maxLength={100}
+                    autoComplete="name"
+                    className={fieldErrors.customerName ? "border-destructive" : ""}
                   />
+                  {fieldErrors.customerName && (
+                    <p className="text-sm text-destructive mt-1">{fieldErrors.customerName}</p>
+                  )}
                 </div>
 
                 <div>
@@ -192,7 +238,14 @@ export default function FinalizarPedidoPage() {
                     onChange={(e) => setNotes(e.target.value)}
                     placeholder="Alguma observação sobre o pedido? (opcional)"
                     rows={3}
+                    disabled={loading}
+                    maxLength={500}
+                    className={fieldErrors.notes ? "border-destructive" : ""}
                   />
+                  {fieldErrors.notes && (
+                    <p className="text-sm text-destructive mt-1">{fieldErrors.notes}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-1">{notes.length}/500 caracteres</p>
                 </div>
 
                 <Button type="submit" className="w-full" size="lg" disabled={loading}>

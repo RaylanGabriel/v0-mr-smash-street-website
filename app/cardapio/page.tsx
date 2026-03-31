@@ -51,14 +51,35 @@ export default function CardapioPage() {
   }
 
   const loadCartFromStorage = () => {
-    const saved = localStorage.getItem("cart")
-    if (saved) {
-      setCart(JSON.parse(saved))
+    try {
+      const saved = localStorage.getItem("cart")
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        // Validação básica da estrutura do carrinho
+        if (Array.isArray(parsed) && parsed.every(item => 
+          item.menuItem && 
+          typeof item.quantity === 'number' && 
+          item.quantity > 0
+        )) {
+          setCart(parsed)
+        } else {
+          // Limpa dados corrompidos
+          localStorage.removeItem("cart")
+        }
+      }
+    } catch (error) {
+      // Limpa dados corrompidos
+      console.error("Erro ao carregar carrinho:", error)
+      localStorage.removeItem("cart")
     }
   }
 
   const saveCartToStorage = (newCart: CartItem[]) => {
-    localStorage.setItem("cart", JSON.stringify(newCart))
+    try {
+      localStorage.setItem("cart", JSON.stringify(newCart))
+    } catch (error) {
+      console.error("Erro ao salvar carrinho:", error)
+    }
   }
 
   const addToCart = () => {
