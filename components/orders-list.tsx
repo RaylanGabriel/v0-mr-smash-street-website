@@ -127,7 +127,7 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
             <p className="text-muted-foreground col-span-full text-center py-8">Nenhum pedido ativo no momento</p>
           ) : (
             activeOrders.map((order) => {
-              const config = statusConfig[order.status as keyof typeof statusConfig]
+              const config = statusConfig[order.status as keyof typeof statusConfig] || statusConfig.pending
               const Icon = config.icon
               const nextStatus = getNextStatus(order.status)
 
