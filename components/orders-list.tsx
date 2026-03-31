@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import type { OrderWithItems } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -17,6 +17,65 @@ interface OrdersListProps {
 export function OrdersList({ initialOrders }: OrdersListProps) {
   const [orders, setOrders] = useState<OrderWithItems[]>(initialOrders)
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const supabase = createClient()
+
+    const channel = supabase
+      .channel("orders-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, async (payload) => {
+        console.log("[v0] Order update received:", payload)
+
+        if (payload.eventType === "UPDATE") {
+          const { data: updatedOrder } = await supabase
+            .from("orders")
+            .select(`
+                *,
+                order_items (
+                  *,
+                  menu_items (*),
+                  order_item_ingredients (
+                    *,
+                    ingredients (*)
+                  )
+                )
+              `)
+            .eq("id", payload.new.id)
+            .single()
+
+          if (updatedOrder) {
+            setOrders((prevOrders) =>
+              prevOrders.map((order) => (order.id === updatedOrder.id ? (updatedOrder as OrderWithItems) : order)),
+            )
+          }
+        } else if (payload.eventType === "INSERT") {
+          const { data: newOrder } = await supabase
+            .from("orders")
+            .select(`
+                *,
+                order_items (
+                  *,
+                  menu_items (*),
+                  order_item_ingredients (
+                    *,
+                    ingredients (*)
+                  )
+                )
+              `)
+            .eq("id", payload.new.id)
+            .single()
+
+          if (newOrder) {
+            setOrders((prevOrders) => [newOrder as OrderWithItems, ...prevOrders])
+          }
+        }
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [])
 
   const statusConfig = {
     pending: { label: "Pendente", icon: Package, variant: "secondary" as const },

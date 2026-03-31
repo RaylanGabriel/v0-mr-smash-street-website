@@ -30,6 +30,46 @@ export default function MeuPedidoPage() {
     }
   }, [numeroParam])
 
+  useEffect(() => {
+    if (!order) return
+
+    const channel = supabase
+      .channel(`order-${order.id}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${order.id}` },
+        async (payload) => {
+          console.log("[v0] Order status updated:", payload)
+
+          // Buscar pedido atualizado com todos os relacionamentos
+          const { data: updatedOrder } = await supabase
+            .from("orders")
+            .select(`
+              *,
+              order_items (
+                *,
+                menu_items (*),
+                order_item_ingredients (
+                  *,
+                  ingredients (*)
+                )
+              )
+            `)
+            .eq("id", order.id)
+            .single()
+
+          if (updatedOrder) {
+            setOrder(updatedOrder as OrderWithItems)
+          }
+        },
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [order])
+
   const searchOrder = async (numero: string) => {
     if (!numero.trim()) {
       setError("Digite o número do pedido")
