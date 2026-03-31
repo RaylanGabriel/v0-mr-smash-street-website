@@ -5,7 +5,7 @@ import type { OrderWithItems } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Clock, User, CheckCircle, Package, Truck } from "lucide-react"
+import { Clock, User, CheckCircle, Package, Truck, Printer } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { format } from "date-fns"
 import { ptBR } from "date-fns/locale"
@@ -117,6 +117,135 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
   const activeOrders = orders.filter((o) => o.status !== "delivered")
   const completedOrders = orders.filter((o) => o.status === "delivered")
 
+  const printOrder = (order: OrderWithItems) => {
+    const printWindow = window.open("", "_blank", "width=400,height=600")
+    if (!printWindow) return
+
+    const orderDate = format(new Date(order.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })
+    
+    const itemsHtml = order.order_items.map((item) => {
+      const extrasHtml = item.order_item_ingredients && item.order_item_ingredients.length > 0
+        ? item.order_item_ingredients.map((extra) => 
+            `<div style="padding-left: 15px; font-size: 12px; color: #666;">+ ${extra.quantity}x ${extra.ingredients.name}</div>`
+          ).join("")
+        : ""
+      
+      return `
+        <div style="margin-bottom: 8px; border-bottom: 1px dashed #ccc; padding-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between;">
+            <strong>${item.quantity}x ${item.menu_items.name}</strong>
+            <span>R$ ${(item.price * item.quantity).toFixed(2)}</span>
+          </div>
+          ${extrasHtml}
+        </div>
+      `
+    }).join("")
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Pedido #${order.order_number}</title>
+        <style>
+          body {
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+            max-width: 300px;
+            margin: 0 auto;
+          }
+          .header {
+            text-align: center;
+            border-bottom: 2px solid #000;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+          }
+          .header h1 {
+            margin: 0;
+            font-size: 18px;
+          }
+          .header h2 {
+            margin: 5px 0;
+            font-size: 14px;
+            font-weight: normal;
+          }
+          .info {
+            margin-bottom: 15px;
+            font-size: 13px;
+          }
+          .info p {
+            margin: 3px 0;
+          }
+          .items {
+            margin-bottom: 15px;
+          }
+          .total {
+            border-top: 2px solid #000;
+            padding-top: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+          }
+          .notes {
+            margin-top: 15px;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 5px;
+            font-size: 12px;
+          }
+          .footer {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 11px;
+            color: #666;
+          }
+          @media print {
+            body { padding: 0; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>MR. SMASH STREET</h1>
+          <h2>Burger Joint</h2>
+        </div>
+        
+        <div class="info">
+          <p><strong>Pedido:</strong> #${order.order_number}</p>
+          <p><strong>Cliente:</strong> ${order.customer_name}</p>
+          <p><strong>Data:</strong> ${orderDate}</p>
+          <p><strong>Tempo estimado:</strong> ${order.estimated_wait_time} min</p>
+        </div>
+        
+        <div class="items">
+          ${itemsHtml}
+        </div>
+        
+        <div class="total">
+          <span>TOTAL:</span>
+          <span>R$ ${order.total_price.toFixed(2)}</span>
+        </div>
+        
+        ${order.notes ? `
+          <div class="notes">
+            <strong>Observações:</strong><br/>
+            ${order.notes}
+          </div>
+        ` : ""}
+        
+        <div class="footer">
+          <p>Obrigado pela preferência!</p>
+        </div>
+      </body>
+      </html>
+    `
+
+    printWindow.document.write(html)
+    printWindow.document.close()
+    printWindow.focus()
+    printWindow.print()
+  }
+
   return (
     <div className="space-y-8">
       {/* Pedidos Ativos */}
@@ -194,17 +323,27 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
                       </div>
                     </div>
 
-                    {nextStatus && (
+                    <div className="flex gap-2">
                       <Button
-                        className="w-full"
-                        onClick={() => updateOrderStatus(order.id, nextStatus)}
-                        disabled={updatingOrderId === order.id}
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => printOrder(order)}
                       >
-                        {updatingOrderId === order.id
-                          ? "Atualizando..."
-                          : `Marcar como ${statusConfig[nextStatus as keyof typeof statusConfig].label}`}
+                        <Printer className="w-4 h-4 mr-2" />
+                        Imprimir
                       </Button>
-                    )}
+                      {nextStatus && (
+                        <Button
+                          className="flex-1"
+                          onClick={() => updateOrderStatus(order.id, nextStatus)}
+                          disabled={updatingOrderId === order.id}
+                        >
+                          {updatingOrderId === order.id
+                            ? "Atualizando..."
+                            : `${statusConfig[nextStatus as keyof typeof statusConfig].label}`}
+                        </Button>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               )
@@ -259,6 +398,15 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
                       {order.completed_at &&
                         format(new Date(order.completed_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                     </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full mt-3"
+                      onClick={() => printOrder(order)}
+                    >
+                      <Printer className="w-4 h-4 mr-2" />
+                      Imprimir
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
