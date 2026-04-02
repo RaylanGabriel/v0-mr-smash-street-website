@@ -27,6 +27,7 @@ export interface Order {
   notes: string | null
   created_at: string
   completed_at: string | null
+  is_paid: boolean
 }
 
 export interface OrderItem {

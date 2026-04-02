@@ -5,7 +5,7 @@ import type { OrderWithItems } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Clock, User, CheckCircle, Package, Truck, Printer, Trash2 } from "lucide-react"
+import { Clock, User, CheckCircle, Package, Truck, Printer, Trash2, DollarSign } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { format } from "date-fns"
 import { ptBR } from "date-fns/locale"
@@ -18,6 +18,7 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
   const [orders, setOrders] = useState<OrderWithItems[]>(initialOrders)
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
   const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null)
+  const [togglingPaymentId, setTogglingPaymentId] = useState<string | null>(null)
 
   useEffect(() => {
     const supabase = createClient()
@@ -163,6 +164,28 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
     } finally {
       setDeletingOrderId(null)
     }
+  }
+
+  const togglePaymentStatus = async (orderId: string, currentStatus: boolean) => {
+    setTogglingPaymentId(orderId)
+    const supabase = createClient()
+
+    const { error } = await supabase
+      .from("orders")
+      .update({ is_paid: !currentStatus })
+      .eq("id", orderId)
+
+    if (!error) {
+      setOrders(
+        orders.map((order) =>
+          order.id === orderId
+            ? { ...order, is_paid: !currentStatus }
+            : order,
+        ),
+      )
+    }
+
+    setTogglingPaymentId(null)
   }
 
   const activeOrders = orders.filter((o) => o.status !== "delivered")
@@ -389,10 +412,20 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
                           {order.customer_name}
                         </CardDescription>
                       </div>
-                      <Badge variant={config.variant} className="flex items-center gap-1">
-                        <Icon className="w-3 h-3" />
-                        {config.label}
-                      </Badge>
+                      <div className="flex flex-col gap-1 items-end">
+                        <Badge variant={config.variant} className="flex items-center gap-1">
+                          <Icon className="w-3 h-3" />
+                          {config.label}
+                        </Badge>
+                        <Badge 
+                          variant={order.is_paid ? "default" : "destructive"} 
+                          className="flex items-center gap-1 cursor-pointer"
+                          onClick={() => togglePaymentStatus(order.id, order.is_paid)}
+                        >
+                          <DollarSign className="w-3 h-3" />
+                          {togglingPaymentId === order.id ? "..." : order.is_paid ? "Pago" : "Não Pago"}
+                        </Badge>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -497,10 +530,20 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
                         {order.customer_name}
                       </CardDescription>
                     </div>
-                    <Badge variant="outline" className="flex items-center gap-1">
-                      <CheckCircle className="w-3 h-3" />
-                      Entregue
-                    </Badge>
+                    <div className="flex flex-col gap-1 items-end">
+                      <Badge variant="outline" className="flex items-center gap-1">
+                        <CheckCircle className="w-3 h-3" />
+                        Entregue
+                      </Badge>
+                      <Badge 
+                        variant={order.is_paid ? "default" : "destructive"} 
+                        className="flex items-center gap-1 cursor-pointer"
+                        onClick={() => togglePaymentStatus(order.id, order.is_paid)}
+                      >
+                        <DollarSign className="w-3 h-3" />
+                        {togglingPaymentId === order.id ? "..." : order.is_paid ? "Pago" : "Não Pago"}
+                      </Badge>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
