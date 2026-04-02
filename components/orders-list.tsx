@@ -5,7 +5,7 @@ import type { OrderWithItems } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Clock, User, CheckCircle, Package, Truck, Printer } from "lucide-react"
+import { Clock, User, CheckCircle, Package, Truck, Printer, Trash2 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { format } from "date-fns"
 import { ptBR } from "date-fns/locale"
@@ -17,6 +17,7 @@ interface OrdersListProps {
 export function OrdersList({ initialOrders }: OrdersListProps) {
   const [orders, setOrders] = useState<OrderWithItems[]>(initialOrders)
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null)
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null)
 
   useEffect(() => {
     const supabase = createClient()
@@ -24,8 +25,6 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
     const channel = supabase
       .channel("orders-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, async (payload) => {
-        console.log("[v0] Order update received:", payload)
-
         if (payload.eventType === "UPDATE") {
           const { data: updatedOrder } = await supabase
             .from("orders")
@@ -48,6 +47,8 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
               prevOrders.map((order) => (order.id === updatedOrder.id ? (updatedOrder as OrderWithItems) : order)),
             )
           }
+        } else if (payload.eventType === "DELETE") {
+          setOrders((prevOrders) => prevOrders.filter((order) => order.id !== payload.old.id))
         } else if (payload.eventType === "INSERT") {
           const { data: newOrder } = await supabase
             .from("orders")
@@ -114,93 +115,203 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
     return currentIndex < statusFlow.length - 1 ? statusFlow[currentIndex + 1] : null
   }
 
+  const deleteOrder = async (orderId: string, orderNumber: number) => {
+    const confirmed = window.confirm(
+      `Tem certeza que deseja excluir o pedido #${orderNumber}?\n\nEsta ação não pode ser desfeita.`
+    )
+    
+    if (!confirmed) return
+
+    setDeletingOrderId(orderId)
+    const supabase = createClient()
+
+    try {
+      // Primeiro excluir os ingredientes dos itens do pedido
+      const { data: orderItems } = await supabase
+        .from("order_items")
+        .select("id")
+        .eq("order_id", orderId)
+
+      if (orderItems && orderItems.length > 0) {
+        const orderItemIds = orderItems.map((item) => item.id)
+        
+        await supabase
+          .from("order_item_ingredients")
+          .delete()
+          .in("order_item_id", orderItemIds)
+      }
+
+      // Excluir os itens do pedido
+      await supabase
+        .from("order_items")
+        .delete()
+        .eq("order_id", orderId)
+
+      // Excluir o pedido
+      const { error } = await supabase
+        .from("orders")
+        .delete()
+        .eq("id", orderId)
+
+      if (error) throw error
+
+      // Atualizar estado local
+      setOrders(orders.filter((order) => order.id !== orderId))
+    } catch (error) {
+      console.error("Erro ao excluir pedido:", error)
+      alert("Erro ao excluir pedido. Tente novamente.")
+    } finally {
+      setDeletingOrderId(null)
+    }
+  }
+
   const activeOrders = orders.filter((o) => o.status !== "delivered")
   const completedOrders = orders.filter((o) => o.status === "delivered")
 
   const printOrder = (order: OrderWithItems) => {
-    const printWindow = window.open("", "_blank", "width=400,height=600")
+    const printWindow = window.open("", "_blank", "width=250,height=400")
     if (!printWindow) return
 
-    const orderDate = format(new Date(order.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })
+    const orderDate = format(new Date(order.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })
     
     const itemsHtml = order.order_items.map((item) => {
       const extrasHtml = item.order_item_ingredients && item.order_item_ingredients.length > 0
         ? item.order_item_ingredients.map((extra) => 
-            `<div style="padding-left: 15px; font-size: 12px; color: #666;">+ ${extra.quantity}x ${extra.ingredients.name}</div>`
+            `<div class="extra">+ ${extra.quantity}x ${extra.ingredients.name}</div>`
           ).join("")
         : ""
       
       return `
-        <div style="margin-bottom: 8px; border-bottom: 1px dashed #ccc; padding-bottom: 8px;">
-          <div style="display: flex; justify-content: space-between;">
-            <strong>${item.quantity}x ${item.menu_items.name}</strong>
-            <span>R$ ${(item.price * item.quantity).toFixed(2)}</span>
+        <div class="item">
+          <div class="item-row">
+            <span>${item.quantity}x ${item.menu_items.name}</span>
+            <span>R$${(item.price * item.quantity).toFixed(2)}</span>
           </div>
           ${extrasHtml}
         </div>
       `
     }).join("")
 
+    // Configurações para impressora térmica 58mm (largura útil ~48mm = ~180 pontos a 384dpi)
+    // Fonte: 12x24 pontos (normal), 9x17 pontos (pequeno), 24x24 pontos (destaque)
     const html = `
       <!DOCTYPE html>
       <html>
       <head>
+        <meta charset="UTF-8">
         <title>Pedido #${order.order_number}</title>
         <style>
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+          }
+          @page {
+            size: 58mm auto;
+            margin: 0;
+          }
           body {
-            font-family: 'Courier New', monospace;
-            padding: 20px;
-            max-width: 300px;
-            margin: 0 auto;
+            font-family: 'Courier New', 'Lucida Console', monospace;
+            font-size: 10px;
+            line-height: 1.2;
+            width: 48mm;
+            padding: 2mm;
+            background: #fff;
+            color: #000;
           }
           .header {
             text-align: center;
-            border-bottom: 2px solid #000;
-            padding-bottom: 10px;
-            margin-bottom: 15px;
+            border-bottom: 1px dashed #000;
+            padding-bottom: 3mm;
+            margin-bottom: 2mm;
           }
           .header h1 {
-            margin: 0;
-            font-size: 18px;
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: -0.5px;
           }
           .header h2 {
-            margin: 5px 0;
-            font-size: 14px;
+            font-size: 9px;
             font-weight: normal;
           }
+          .divider {
+            border-top: 1px dashed #000;
+            margin: 2mm 0;
+          }
           .info {
-            margin-bottom: 15px;
-            font-size: 13px;
+            font-size: 9px;
+            margin-bottom: 2mm;
           }
           .info p {
-            margin: 3px 0;
+            margin: 1px 0;
+          }
+          .info .order-num {
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            margin: 2mm 0;
           }
           .items {
-            margin-bottom: 15px;
+            margin: 2mm 0;
           }
-          .total {
-            border-top: 2px solid #000;
-            padding-top: 10px;
-            font-size: 16px;
-            font-weight: bold;
+          .item {
+            margin-bottom: 2mm;
+            padding-bottom: 1mm;
+            border-bottom: 1px dotted #ccc;
+          }
+          .item:last-child {
+            border-bottom: none;
+          }
+          .item-row {
             display: flex;
             justify-content: space-between;
+            font-size: 9px;
+            font-weight: bold;
+          }
+          .extra {
+            padding-left: 2mm;
+            font-size: 8px;
+            color: #333;
+          }
+          .total-section {
+            border-top: 1px dashed #000;
+            padding-top: 2mm;
+            margin-top: 2mm;
+          }
+          .total {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            font-weight: bold;
           }
           .notes {
-            margin-top: 15px;
-            padding: 10px;
-            background: #f5f5f5;
-            border-radius: 5px;
-            font-size: 12px;
+            margin-top: 2mm;
+            padding: 2mm;
+            border: 1px dashed #000;
+            font-size: 8px;
+          }
+          .notes-title {
+            font-weight: bold;
+            margin-bottom: 1mm;
           }
           .footer {
             text-align: center;
-            margin-top: 20px;
-            font-size: 11px;
-            color: #666;
+            margin-top: 3mm;
+            padding-top: 2mm;
+            border-top: 1px dashed #000;
+            font-size: 8px;
+          }
+          .footer p {
+            margin: 1px 0;
           }
           @media print {
-            body { padding: 0; }
+            body {
+              width: 48mm;
+              padding: 1mm;
+            }
+            .no-print {
+              display: none;
+            }
           }
         </style>
       </head>
@@ -211,30 +322,35 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
         </div>
         
         <div class="info">
-          <p><strong>Pedido:</strong> #${order.order_number}</p>
-          <p><strong>Cliente:</strong> ${order.customer_name}</p>
-          <p><strong>Data:</strong> ${orderDate}</p>
-          <p><strong>Tempo estimado:</strong> ${order.estimated_wait_time} min</p>
+          <p class="order-num">#${order.order_number}</p>
+          <p><b>Cliente:</b> ${order.customer_name}</p>
+          <p><b>Data:</b> ${orderDate}</p>
+          <p><b>Tempo:</b> ${order.estimated_wait_time} min</p>
         </div>
+        
+        <div class="divider"></div>
         
         <div class="items">
           ${itemsHtml}
         </div>
         
-        <div class="total">
-          <span>TOTAL:</span>
-          <span>R$ ${order.total_price.toFixed(2)}</span>
+        <div class="total-section">
+          <div class="total">
+            <span>TOTAL:</span>
+            <span>R$${order.total_price.toFixed(2)}</span>
+          </div>
         </div>
         
         ${order.notes ? `
           <div class="notes">
-            <strong>Observações:</strong><br/>
+            <div class="notes-title">OBS:</div>
             ${order.notes}
           </div>
         ` : ""}
         
         <div class="footer">
-          <p>Obrigado pela preferência!</p>
+          <p>Obrigado pela preferencia!</p>
+          <p>MR. SMASH STREET</p>
         </div>
       </body>
       </html>
@@ -243,7 +359,9 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
     printWindow.document.write(html)
     printWindow.document.close()
     printWindow.focus()
-    printWindow.print()
+    setTimeout(() => {
+      printWindow.print()
+    }, 250)
   }
 
   return (
@@ -323,26 +441,37 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
                       </div>
                     </div>
 
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() => printOrder(order)}
-                      >
-                        <Printer className="w-4 h-4 mr-2" />
-                        Imprimir
-                      </Button>
-                      {nextStatus && (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex gap-2">
                         <Button
+                          variant="outline"
                           className="flex-1"
-                          onClick={() => updateOrderStatus(order.id, nextStatus)}
-                          disabled={updatingOrderId === order.id}
+                          onClick={() => printOrder(order)}
                         >
-                          {updatingOrderId === order.id
-                            ? "Atualizando..."
-                            : `${statusConfig[nextStatus as keyof typeof statusConfig].label}`}
+                          <Printer className="w-4 h-4 mr-2" />
+                          Imprimir
                         </Button>
-                      )}
+                        {nextStatus && (
+                          <Button
+                            className="flex-1"
+                            onClick={() => updateOrderStatus(order.id, nextStatus)}
+                            disabled={updatingOrderId === order.id}
+                          >
+                            {updatingOrderId === order.id
+                              ? "Atualizando..."
+                              : `${statusConfig[nextStatus as keyof typeof statusConfig].label}`}
+                          </Button>
+                        )}
+                      </div>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => deleteOrder(order.id, order.order_number)}
+                        disabled={deletingOrderId === order.id}
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        {deletingOrderId === order.id ? "Excluindo..." : "Excluir Pedido"}
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -398,15 +527,27 @@ export function OrdersList({ initialOrders }: OrdersListProps) {
                       {order.completed_at &&
                         format(new Date(order.completed_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full mt-3"
-                      onClick={() => printOrder(order)}
-                    >
-                      <Printer className="w-4 h-4 mr-2" />
-                      Imprimir
-                    </Button>
+                    <div className="flex gap-2 mt-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => printOrder(order)}
+                      >
+                        <Printer className="w-4 h-4 mr-2" />
+                        Imprimir
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => deleteOrder(order.id, order.order_number)}
+                        disabled={deletingOrderId === order.id}
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        {deletingOrderId === order.id ? "..." : "Excluir"}
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
