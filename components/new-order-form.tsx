@@ -132,7 +132,7 @@ export function NewOrderForm({ menuItems, ingredients }: NewOrderFormProps) {
         .insert({
           customer_name: sanitizedName,
           total_price: calculateTotal(),
-          estimated_wait_time: cart.length * 10, // 10 minutos por item
+          estimated_wait_time: cart.length * 25, // 25 minutos por item
           notes: sanitizedNotes,
           status: "pending",
         })

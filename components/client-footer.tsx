@@ -14,9 +14,9 @@ export function ClientFooter() {
                 <MapPin className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
                 <div>
                   <p className="font-medium text-foreground">Endereço</p>
-                  <p>Rua das Palmeiras, 123</p>
-                  <p>Centro - São Paulo, SP</p>
-                  <p>CEP: 01234-567</p>
+                  <p>Rua Marcelino Nogueira, 177</p>
+                  <p>Ronda - Ponta Grossa, PR</p>
+                  <p>CEP: 84051-240</p>
                 </div>
               </div>
 
@@ -24,7 +24,7 @@ export function ClientFooter() {
                 <Phone className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
                 <div>
                   <p className="font-medium text-foreground">Telefone</p>
-                  <p>(11) 98765-4321</p>
+                  <p>(42) 98434-7835</p>
                 </div>
               </div>
             </div>
@@ -76,7 +76,7 @@ export function ClientFooter() {
               </Link>
 
               <Link
-                href="https://wa.me/5511987654321"
+                href="https://wa.me/5542984347835"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-center w-10 h-10 rounded-full bg-primary/10 hover:bg-primary hover:text-primary-foreground transition-all"
