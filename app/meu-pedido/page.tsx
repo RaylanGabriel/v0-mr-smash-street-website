@@ -116,14 +116,20 @@ export default function MeuPedidoPage() {
         `,
         )
         .eq("order_number", Number.parseInt(trimmedNumero))
-        .single()
+        .maybeSingle()
 
       if (fetchError) throw fetchError
+
+      if (!data) {
+        setError("Pedido não encontrado. Verifique o número e tente novamente.")
+        setOrder(null)
+        return
+      }
 
       setOrder(data as OrderWithItems)
     } catch (err) {
       console.error("Erro ao buscar pedido:", err)
-      setError("Pedido não encontrado. Verifique o número e tente novamente.")
+      setError("Erro ao buscar pedido. Tente novamente.")
       setOrder(null)
     } finally {
       setLoading(false)
