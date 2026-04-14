@@ -3,107 +3,52 @@
 import { useState, useEffect } from "react"
 import { createBrowserClient } from "@/lib/supabase/client"
 import type { OrderWithItems } from "@/lib/types"
-import { useSearchParams } from "next/navigation"
+import type { User } from "@supabase/supabase-js"
 import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, Search, Clock, CheckCircle2, Loader2, Package } from "lucide-react"
+import { ArrowLeft, Clock, CheckCircle2, Loader2, Package, ShoppingBag, LogIn } from "lucide-react"
 import { ClientHeader } from "@/components/client-header"
 import { ClientFooter } from "@/components/client-footer"
 import { sanitizeString } from "@/lib/validations"
-import { checkRateLimit } from "@/lib/rate-limit"
 
 export default function MeuPedidoPage() {
-  const searchParams = useSearchParams()
-  const numeroParam = searchParams.get("numero")
-
-  const [orderNumber, setOrderNumber] = useState(numeroParam || "")
-  const [order, setOrder] = useState<OrderWithItems | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [user, setUser] = useState<User | null>(null)
+  const [orders, setOrders] = useState<OrderWithItems[]>([])
+  const [loading, setLoading] = useState(true)
+  const [authLoading, setAuthLoading] = useState(true)
   const supabase = createBrowserClient()
 
+  // Verificar autenticação
   useEffect(() => {
-    if (numeroParam) {
-      searchOrder(numeroParam)
-    }
-  }, [numeroParam])
-
-  useEffect(() => {
-    if (!order) return
-
-    const channel = supabase
-      .channel(`order-${order.id}`)
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${order.id}` },
-        async () => {
-          // Buscar pedido atualizado com todos os relacionamentos
-          const { data: updatedOrder } = await supabase
-            .from("orders")
-            .select(`
-              *,
-              order_items (
-                *,
-                menu_items (*),
-                order_item_ingredients (
-                  *,
-                  ingredients (*)
-                )
-              )
-            `)
-            .eq("id", order.id)
-            .single()
-
-          if (updatedOrder) {
-            setOrder(updatedOrder as OrderWithItems)
-          }
-        },
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [order])
-
-  const searchOrder = async (numero: string) => {
-    const trimmedNumero = numero.trim()
-    
-    if (!trimmedNumero) {
-      setError("Digite o número do pedido")
-      return
+    const checkAuth = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      setUser(user)
+      setAuthLoading(false)
     }
 
-    // Validação: apenas números
-    if (!/^\d+$/.test(trimmedNumero)) {
-      setError("Número do pedido inválido. Digite apenas números.")
-      return
-    }
+    checkAuth()
 
-    // Rate limiting - máximo 10 buscas por minuto
-    const rateLimitResult = checkRateLimit("order-search", {
-      maxAttempts: 10,
-      windowMs: 60 * 1000,
-      blockDurationMs: 60 * 1000,
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
     })
 
-    if (!rateLimitResult.allowed) {
-      setError(rateLimitResult.message || "Muitas tentativas. Aguarde um momento.")
+    return () => subscription.unsubscribe()
+  }, [])
+
+  // Buscar pedidos do usuário
+  useEffect(() => {
+    if (!user) {
+      setLoading(false)
       return
     }
 
-    setLoading(true)
-    setError("")
-
-    try {
-      const { data, error: fetchError } = await supabase
+    const fetchOrders = async () => {
+      setLoading(true)
+      const { data, error } = await supabase
         .from("orders")
-        .select(
-          `
+        .select(`
           *,
           order_items (
             *,
@@ -113,28 +58,39 @@ export default function MeuPedidoPage() {
               ingredients (*)
             )
           )
-        `,
-        )
-        .eq("order_number", Number.parseInt(trimmedNumero))
-        .limit(1)
+        `)
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
 
-      if (fetchError) throw fetchError
-
-      if (!data || data.length === 0) {
-        setError("Pedido não encontrado. Verifique o número e tente novamente.")
-        setOrder(null)
-        return
+      if (!error && data) {
+        setOrders(data as OrderWithItems[])
       }
-
-      setOrder(data[0] as OrderWithItems)
-    } catch (err) {
-      console.error("Erro ao buscar pedido:", err)
-      setError("Erro ao buscar pedido. Tente novamente.")
-      setOrder(null)
-    } finally {
       setLoading(false)
     }
-  }
+
+    fetchOrders()
+
+    // Realtime updates para os pedidos do usuário
+    const channel = supabase
+      .channel("user-orders")
+      .on(
+        "postgres_changes",
+        { 
+          event: "*", 
+          schema: "public", 
+          table: "orders",
+          filter: `user_id=eq.${user.id}`
+        },
+        async () => {
+          fetchOrders()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user])
 
   const getStatusInfo = (status: string) => {
     switch (status) {
@@ -151,15 +107,85 @@ export default function MeuPedidoPage() {
     }
   }
 
-  const statusInfo = order ? getStatusInfo(order.status) : null
-  const StatusIcon = statusInfo?.icon
+  // Tela de loading de autenticação
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex flex-col bg-gradient-to-br from-background via-background to-muted">
+        <ClientHeader />
+        <main className="flex-1 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </main>
+        <ClientFooter />
+      </div>
+    )
+  }
+
+  // Tela para usuário não logado
+  if (!user) {
+    return (
+      <div className="min-h-screen flex flex-col bg-gradient-to-br from-background via-background to-muted">
+        <ClientHeader />
+        <main className="flex-1 flex items-center justify-center p-4">
+          <Card className="w-full max-w-md text-center">
+            <CardHeader>
+              <div className="flex justify-center mb-4">
+                <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
+                  <LogIn className="w-8 h-8 text-primary" />
+                </div>
+              </div>
+              <CardTitle>Faca login para ver seus pedidos</CardTitle>
+              <CardDescription>
+                Para garantir sua privacidade e seguranca, voce precisa estar logado para visualizar seus pedidos.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button asChild className="w-full">
+                <Link href="/cliente/login">
+                  <LogIn className="w-4 h-4 mr-2" />
+                  Fazer Login
+                </Link>
+              </Button>
+              <Button variant="outline" asChild className="w-full">
+                <Link href="/cliente/cadastro">
+                  Criar uma conta
+                </Link>
+              </Button>
+              <Button variant="ghost" asChild className="w-full">
+                <Link href="/">
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Voltar ao inicio
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+        <ClientFooter />
+      </div>
+    )
+  }
+
+  // Tela de loading dos pedidos
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col bg-gradient-to-br from-background via-background to-muted">
+        <ClientHeader />
+        <main className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-4" />
+            <p className="text-muted-foreground">Carregando seus pedidos...</p>
+          </div>
+        </main>
+        <ClientFooter />
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-background via-background to-muted">
       <ClientHeader />
 
       <main className="flex-1">
-        <div className="container mx-auto px-4 py-8 max-w-2xl">
+        <div className="container mx-auto px-4 py-8 max-w-3xl">
           <Link href="/">
             <Button variant="ghost" size="sm" className="mb-6">
               <ArrowLeft className="w-4 h-4 mr-2" />
@@ -167,127 +193,110 @@ export default function MeuPedidoPage() {
             </Button>
           </Link>
 
-          <h1 className="text-3xl font-bold mb-8 text-center">Acompanhar Pedido</h1>
+          <h1 className="text-3xl font-bold mb-2">Meus Pedidos</h1>
+          <p className="text-muted-foreground mb-8">
+            Ola, {user.user_metadata?.full_name || user.email?.split("@")[0]}! Aqui estao seus pedidos.
+          </p>
 
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>Digite o número do seu pedido</CardTitle>
-              <CardDescription>Você recebeu o número do pedido após finalizar a compra</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  searchOrder(orderNumber)
-                }}
-                className="flex gap-2"
-              >
-                <div className="flex-1">
-                  <Label htmlFor="orderNumber" className="sr-only">
-                    Número do Pedido
-                  </Label>
-                  <Input
-                    id="orderNumber"
-                    type="number"
-                    value={orderNumber}
-                    onChange={(e) => setOrderNumber(e.target.value)}
-                    placeholder="Ex: 1234"
-                    required
-                  />
+          {orders.length === 0 ? (
+            <Card className="text-center py-12">
+              <CardContent>
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center">
+                    <ShoppingBag className="w-8 h-8 text-muted-foreground" />
+                  </div>
                 </div>
-                <Button type="submit" disabled={loading}>
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                <h3 className="text-xl font-semibold mb-2">Nenhum pedido ainda</h3>
+                <p className="text-muted-foreground mb-6">
+                  Voce ainda nao fez nenhum pedido. Que tal experimentar nossos deliciosos burgers?
+                </p>
+                <Button asChild>
+                  <Link href="/cardapio">Ver Cardapio</Link>
                 </Button>
-              </form>
-              {error && <p className="text-destructive text-sm mt-2">{error}</p>}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-6">
+              {orders.map((order) => {
+                const statusInfo = getStatusInfo(order.status)
+                const StatusIcon = statusInfo.icon
 
-          {order && (
-            <>
-              <Card className="mb-6">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle>Pedido #{order.order_number}</CardTitle>
-                      <CardDescription>{order.customer_name}</CardDescription>
-                    </div>
-                    <Badge className={`${statusInfo?.color} text-white flex items-center gap-1`}>
-                      {StatusIcon && <StatusIcon className="w-4 h-4" />}
-                      {statusInfo?.label}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Data do Pedido</span>
-                      <span>{new Date(order.created_at).toLocaleString("pt-BR")}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Tempo Estimado</span>
-                      <span className="font-semibold">{order.estimated_wait_time} minutos</span>
-                    </div>
-                    {order.notes && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Observações</span>
-                        <span className="max-w-[200px] text-right">{sanitizeString(order.notes)}</span>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="mb-6">
-                <CardHeader>
-                  <CardTitle>Itens do Pedido</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {order.order_items.map((item) => (
-                      <div key={item.id} className="border-b pb-3 last:border-0">
-                        <div className="flex justify-between mb-1">
-                          <p className="font-semibold">
-                            {item.quantity}x {item.menu_items.name}
-                          </p>
-                          <p className="font-semibold">R$ {item.price.toFixed(2)}</p>
+                return (
+                  <Card key={order.id}>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            Pedido #{order.order_number}
+                            {order.status === "pronto" && (
+                              <Badge variant="default" className="bg-green-500">
+                                Pronto para retirar!
+                              </Badge>
+                            )}
+                          </CardTitle>
+                          <CardDescription>
+                            {new Date(order.created_at).toLocaleString("pt-BR")}
+                          </CardDescription>
                         </div>
-                        {item.order_item_ingredients && item.order_item_ingredients.length > 0 && (
-                          <div className="text-sm text-muted-foreground ml-4">
-                            <p className="mb-1">Extras:</p>
-                            <ul className="space-y-1">
-                              {item.order_item_ingredients.map((ing) => (
-                                <li key={ing.id} className="flex justify-between">
-                                  <span>
-                                    • {ing.quantity}x {ing.ingredients.name}
+                        <Badge className={`${statusInfo.color} text-white flex items-center gap-1`}>
+                          <StatusIcon className="w-4 h-4" />
+                          {statusInfo.label}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        {/* Itens do pedido */}
+                        <div className="space-y-2">
+                          {order.order_items.map((item) => (
+                            <div key={item.id} className="flex justify-between text-sm">
+                              <span>
+                                {item.quantity}x {item.menu_items.name}
+                                {item.order_item_ingredients && item.order_item_ingredients.length > 0 && (
+                                  <span className="text-muted-foreground ml-1">
+                                    (+{item.order_item_ingredients.map(i => i.ingredients.name).join(", ")})
                                   </span>
-                                  <span>+R$ {ing.price.toFixed(2)}</span>
-                                </li>
-                              ))}
-                            </ul>
+                                )}
+                              </span>
+                              <span>R$ {(item.price * item.quantity).toFixed(2)}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Informações adicionais */}
+                        <div className="border-t pt-3 space-y-1 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Tempo estimado</span>
+                            <span>{order.estimated_wait_time} minutos</span>
+                          </div>
+                          {order.notes && (
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Observacoes</span>
+                              <span className="max-w-[200px] text-right">{sanitizeString(order.notes)}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Total */}
+                        <div className="border-t pt-3 flex justify-between font-bold">
+                          <span>Total</span>
+                          <span className="text-primary">R$ {order.total_price.toFixed(2)}</span>
+                        </div>
+
+                        {/* Mensagem de pronto */}
+                        {order.status === "pronto" && (
+                          <div className="bg-green-500/10 border border-green-500 rounded-lg p-3 text-center">
+                            <p className="font-semibold text-green-700 dark:text-green-400">
+                              Seu pedido esta pronto! Pode retirar no balcao.
+                            </p>
                           </div>
                         )}
                       </div>
-                    ))}
-
-                    <div className="flex justify-between text-lg font-bold pt-3">
-                      <span>Total</span>
-                      <span className="text-primary">R$ {order.total_price.toFixed(2)}</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {order.status === "pronto" && (
-                <Card className="bg-green-500/10 border-green-500">
-                  <CardContent className="py-4">
-                    <p className="text-center font-semibold text-green-700 dark:text-green-400">
-                      Seu pedido está pronto! Pode retirar no balcão.
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-            </>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
           )}
         </div>
       </main>

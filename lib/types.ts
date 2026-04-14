@@ -28,6 +28,7 @@ export interface Order {
   created_at: string
   completed_at: string | null
   is_paid: boolean
+  user_id: string | null
   // Campos de entrega
   delivery_type: 'pickup' | 'delivery'
   delivery_address: string | null

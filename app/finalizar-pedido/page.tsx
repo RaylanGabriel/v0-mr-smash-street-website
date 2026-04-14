@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { ArrowLeft, Loader2, MapPin, Store, CreditCard, QrCode, Banknote, Truck } from "lucide-react"
+import { ArrowLeft, Loader2, MapPin, Store, CreditCard, QrCode, Banknote, Truck, LogIn } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { ClientHeader } from "@/components/client-header"
 import { ClientFooter } from "@/components/client-footer"
@@ -35,6 +35,26 @@ export default function FinalizarPedidoPage() {
   const isSubmitting = useRef(false)
   const router = useRouter()
   const supabase = createBrowserClient()
+  const [userId, setUserId] = useState<string | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+
+  // Verificar se usuário está logado
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        setUserId(user.id)
+        setIsLoggedIn(true)
+        // Preencher nome automaticamente se disponível
+        if (user.user_metadata?.full_name && !customerName) {
+          setCustomerName(user.user_metadata.full_name)
+        }
+      }
+      setAuthLoading(false)
+    }
+    checkAuth()
+  }, [])
 
   // Estados de entrega
   const [deliveryType, setDeliveryType] = useState<'pickup' | 'delivery'>('pickup')
@@ -196,6 +216,8 @@ export default function FinalizarPedidoPage() {
           // Campos de pagamento
           payment_method: paymentMethod,
           payment_status: paymentMethod === 'counter' ? 'pending' : 'pending',
+          // Vincular ao usuário logado
+          user_id: userId,
         })
         .select()
         .single()
@@ -244,9 +266,66 @@ export default function FinalizarPedidoPage() {
   }
 
   if (cart.length === 0) {
-    return null
+return null
   }
 
+  // Tela de loading de autenticação
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex flex-col bg-gradient-to-br from-background via-background to-muted">
+        <ClientHeader />
+        <main className="flex-1 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </main>
+        <ClientFooter />
+      </div>
+    )
+  }
+
+  // Tela para usuário não logado
+  if (!isLoggedIn) {
+    return (
+      <div className="min-h-screen flex flex-col bg-gradient-to-br from-background via-background to-muted">
+        <ClientHeader />
+        <main className="flex-1 flex items-center justify-center p-4">
+          <Card className="w-full max-w-md text-center">
+            <CardHeader>
+              <div className="flex justify-center mb-4">
+                <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
+                  <LogIn className="w-8 h-8 text-primary" />
+                </div>
+              </div>
+              <CardTitle>Faca login para continuar</CardTitle>
+              <CardDescription>
+                Para fazer um pedido, voce precisa estar logado. Isso garante que voce possa acompanhar seus pedidos e protege seus dados.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button asChild className="w-full">
+                <Link href="/cliente/login">
+                  <LogIn className="w-4 h-4 mr-2" />
+                  Fazer Login
+                </Link>
+              </Button>
+              <Button variant="outline" asChild className="w-full">
+                <Link href="/cliente/cadastro">
+                  Criar uma conta
+                </Link>
+              </Button>
+              <Button variant="ghost" asChild className="w-full">
+                <Link href="/cardapio">
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Voltar ao cardapio
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+        <ClientFooter />
+      </div>
+    )
+  }
+  
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-background via-background to-muted">
       <ClientHeader />
