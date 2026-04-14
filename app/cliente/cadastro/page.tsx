@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
-import { Loader2, Mail, Lock, User, ArrowLeft, CheckCircle } from "lucide-react"
+import { Loader2, Mail, Lock, User, ArrowLeft } from "lucide-react"
 import { ClientHeader } from "@/components/client-header"
 import { ClientFooter } from "@/components/client-footer"
 
@@ -21,7 +21,6 @@ export default function ClienteCadastroPage() {
   const [confirmPassword, setConfirmPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [success, setSuccess] = useState(false)
   const router = useRouter()
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -61,47 +60,14 @@ export default function ClienteCadastroPage() {
         throw error
       }
       
-      setSuccess(true)
+      // Como a confirmacao de email esta desabilitada, redirecionar direto
+      router.push("/meu-pedido")
+      router.refresh()
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "Erro ao criar conta")
     } finally {
       setIsLoading(false)
     }
-  }
-
-  if (success) {
-    return (
-      <div className="min-h-screen bg-background flex flex-col">
-        <ClientHeader />
-        
-        <main className="flex-1 flex items-center justify-center p-4">
-          <Card className="w-full max-w-md">
-            <CardHeader className="text-center">
-              <div className="flex justify-center mb-4">
-                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
-                  <CheckCircle className="w-8 h-8 text-green-600" />
-                </div>
-              </div>
-              <CardTitle className="text-2xl">Conta criada com sucesso!</CardTitle>
-              <CardDescription>
-                Enviamos um email de confirmacao para <strong>{email}</strong>. 
-                Por favor, verifique sua caixa de entrada e clique no link para ativar sua conta.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Button asChild className="w-full">
-                <Link href="/cliente/login">Ir para Login</Link>
-              </Button>
-              <Button variant="outline" asChild className="w-full">
-                <Link href="/">Voltar ao inicio</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        </main>
-
-        <ClientFooter />
-      </div>
-    )
   }
 
   return (
