@@ -34,8 +34,6 @@ export default function ClienteLoginPage() {
       })
       
       if (error) {
-        console.log("[v0] Login error:", error.message, error.status)
-        
         // Mensagens de erro mais claras
         if (error.message.includes("Email not confirmed")) {
           throw new Error("Voce precisa confirmar seu email antes de fazer login. Verifique sua caixa de entrada.")
@@ -46,7 +44,7 @@ export default function ClienteLoginPage() {
         }
       }
       
-      router.push("/meu-pedido")
+      router.push("/")
       router.refresh()
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "Erro ao fazer login")
