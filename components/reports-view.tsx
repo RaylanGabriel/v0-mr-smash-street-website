@@ -5,9 +5,10 @@ import type { OrderWithItems } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { format, startOfDay, endOfDay, isWithinInterval, parseISO } from "date-fns"
+import { Button } from "@/components/ui/button"
+import { format, startOfDay, endOfDay, isWithinInterval, parseISO, isAfter } from "date-fns"
 import { ptBR } from "date-fns/locale"
-import { Calendar, DollarSign, ShoppingBag, TrendingUp } from "lucide-react"
+import { Calendar, DollarSign, ShoppingBag, TrendingUp, Search, X, Loader2 } from "lucide-react"
 
 interface ReportsViewProps {
   orders: OrderWithItems[]
@@ -16,27 +17,67 @@ interface ReportsViewProps {
 export function ReportsView({ orders }: ReportsViewProps) {
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
+  const [appliedStartDate, setAppliedStartDate] = useState("")
+  const [appliedEndDate, setAppliedEndDate] = useState("")
+  const [isSearching, setIsSearching] = useState(false)
+  const [dateError, setDateError] = useState<string | null>(null)
+
+  const validateDates = () => {
+    if (startDate && endDate) {
+      const start = parseISO(startDate)
+      const end = parseISO(endDate)
+      if (isAfter(start, end)) {
+        setDateError("A data inicial não pode ser maior que a data final")
+        return false
+      }
+    }
+    setDateError(null)
+    return true
+  }
+
+  const handleSearch = () => {
+    if (!validateDates()) return
+    
+    setIsSearching(true)
+    // Simula um pequeno delay para feedback visual
+    setTimeout(() => {
+      setAppliedStartDate(startDate)
+      setAppliedEndDate(endDate)
+      setIsSearching(false)
+    }, 300)
+  }
+
+  const handleClearFilters = () => {
+    setStartDate("")
+    setEndDate("")
+    setAppliedStartDate("")
+    setAppliedEndDate("")
+    setDateError(null)
+  }
+
+  const hasFilters = appliedStartDate || appliedEndDate
+  const hasInputDates = startDate || endDate
 
   const filteredOrders = useMemo(() => {
-    if (!startDate && !endDate) return orders
+    if (!appliedStartDate && !appliedEndDate) return orders
 
     return orders.filter((order) => {
       const orderDate = parseISO(order.created_at)
 
-      if (startDate && endDate) {
+      if (appliedStartDate && appliedEndDate) {
         return isWithinInterval(orderDate, {
-          start: startOfDay(parseISO(startDate)),
-          end: endOfDay(parseISO(endDate)),
+          start: startOfDay(parseISO(appliedStartDate)),
+          end: endOfDay(parseISO(appliedEndDate)),
         })
-      } else if (startDate) {
-        return orderDate >= startOfDay(parseISO(startDate))
-      } else if (endDate) {
-        return orderDate <= endOfDay(parseISO(endDate))
+      } else if (appliedStartDate) {
+        return orderDate >= startOfDay(parseISO(appliedStartDate))
+      } else if (appliedEndDate) {
+        return orderDate <= endOfDay(parseISO(appliedEndDate))
       }
 
       return true
     })
-  }, [orders, startDate, endDate])
+  }, [orders, appliedStartDate, appliedEndDate])
 
   const stats = useMemo(() => {
     const totalOrders = filteredOrders.length
@@ -74,20 +115,88 @@ export function ReportsView({ orders }: ReportsViewProps) {
       {/* Filtros */}
       <Card>
         <CardHeader>
-          <CardTitle>Filtrar por Data</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Calendar className="w-5 h-5" />
+            Filtrar por Data
+          </CardTitle>
           <CardDescription>Selecione um período para análise</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="space-y-2">
               <Label htmlFor="startDate">Data Inicial</Label>
-              <Input id="startDate" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              <Input 
+                id="startDate" 
+                type="date" 
+                value={startDate} 
+                onChange={(e) => {
+                  setStartDate(e.target.value)
+                  setDateError(null)
+                }}
+                className={dateError ? "border-destructive" : ""}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="endDate">Data Final</Label>
-              <Input id="endDate" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              <Input 
+                id="endDate" 
+                type="date" 
+                value={endDate} 
+                onChange={(e) => {
+                  setEndDate(e.target.value)
+                  setDateError(null)
+                }}
+                className={dateError ? "border-destructive" : ""}
+              />
+            </div>
+            <div className="flex items-end gap-2">
+              <Button 
+                onClick={handleSearch} 
+                disabled={isSearching || !hasInputDates}
+                className="flex-1"
+              >
+                {isSearching ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Buscando...
+                  </>
+                ) : (
+                  <>
+                    <Search className="w-4 h-4 mr-2" />
+                    Pesquisar
+                  </>
+                )}
+              </Button>
+            </div>
+            <div className="flex items-end">
+              <Button 
+                variant="outline" 
+                onClick={handleClearFilters}
+                disabled={!hasFilters && !hasInputDates}
+                className="flex-1"
+              >
+                <X className="w-4 h-4 mr-2" />
+                Limpar Filtros
+              </Button>
             </div>
           </div>
+          {dateError && (
+            <p className="text-sm text-destructive mt-2">{dateError}</p>
+          )}
+          {hasFilters && (
+            <div className="mt-4 p-3 bg-muted rounded-lg">
+              <p className="text-sm text-muted-foreground">
+                Exibindo resultados de{" "}
+                <span className="font-medium text-foreground">
+                  {appliedStartDate ? format(parseISO(appliedStartDate), "dd/MM/yyyy", { locale: ptBR }) : "início"}
+                </span>
+                {" "}até{" "}
+                <span className="font-medium text-foreground">
+                  {appliedEndDate ? format(parseISO(appliedEndDate), "dd/MM/yyyy", { locale: ptBR }) : "hoje"}
+                </span>
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
