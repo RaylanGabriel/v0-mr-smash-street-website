@@ -28,6 +28,23 @@ export interface Order {
   created_at: string
   completed_at: string | null
   is_paid: boolean
+  // Campos de entrega
+  delivery_type: 'pickup' | 'delivery'
+  delivery_address: string | null
+  delivery_neighborhood: string | null
+  delivery_fee: number
+  delivery_cep: string | null
+  // Campos de pagamento
+  payment_method: 'counter' | 'pix' | 'credit' | 'debit'
+  payment_status: 'pending' | 'approved' | 'rejected'
+  payment_id: string | null
+  pix_qrcode: string | null
+  pix_qrcode_base64: string | null
+}
+
+export interface DeliveryFee {
+  neighborhood: string
+  fee: number
 }
 
 export interface OrderItem {
